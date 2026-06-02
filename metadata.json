@@ -1,0 +1,6 @@
+{
+  "name": "Jo's Coffee Shop POS",
+  "description": "A Point of Sale (POS) system for Jo's Coffee Shop featuring item management, user authentication, checkout, backup, and reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,138 @@
+@import "tailwindcss";
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+
+@theme {
+  --font-sans: 'DM Sans', sans-serif;
+  --font-serif: 'Playfair Display', serif;
+
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-sidebar: hsl(var(--sidebar-background));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+}
+
+:root {
+  --background: 30 25% 96%;
+  --foreground: 25 30% 15%;
+  --card: 30 20% 99%;
+  --card-foreground: 25 30% 15%;
+  --popover: 30 20% 99%;
+  --popover-foreground: 25 30% 15%;
+  --primary: 22 43% 30%; /* Rich dark roasted coffee bean accent */
+  --primary-foreground: 30 25% 96%;
+  --secondary: 30 30% 90%;
+  --secondary-foreground: 25 30% 20%;
+  --muted: 30 15% 92%;
+  --muted-foreground: 25 10% 50%;
+  --accent: 30 40% 82%;
+  --accent-foreground: 25 30% 15%;
+  --destructive: 0 70% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --success: 140 50% 35%;
+  --success-foreground: 0 0% 100%;
+  --border: 30 20% 85%;
+  --input: 30 20% 85%;
+  --ring: 22 43% 30%;
+  --radius: 0.75rem;
+
+  /* Matches the exact deep warm espresso brown from the user's admin panel image */
+  --sidebar-background: 22 40% 15%; /* #352015 */
+  --sidebar-foreground: 30 20% 90%;
+  --sidebar-primary: 22 50% 85%;
+  --sidebar-primary-foreground: 22 40% 15%;
+  --sidebar-accent: 22 35% 24%; /* #4a3124 - soft cocoa active state selection */
+  --sidebar-accent-foreground: 36 100% 90%; /* beautiful warm light active cream font */
+  --sidebar-border: 22 30% 22%;
+  --sidebar-ring: 22 50% 85%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+}
+
+/* Ensure all clickable items across the POS and Admin show the cursor-pointer */
+button:not(:disabled),
+a:not(:disabled),
+input[type="checkbox"],
+input[type="radio"],
+select,
+option,
+label,
+[role="button"] {
+  cursor: pointer !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-serif);
+}
+
+.font-display {
+  font-family: var(--font-serif);
+}
+
+.font-body {
+  font-family: var(--font-sans);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+@media print {
+  body * { visibility: hidden; }
+  .print-receipt, .print-receipt * { visibility: visible; }
+  .print-receipt { position: absolute; left: 0; top: 0; width: 80mm; }
+  
+  /* Support for dynamic print control checkboxes in reports */
+  .print-hide, .hidden-section {
+    display: none !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+}
