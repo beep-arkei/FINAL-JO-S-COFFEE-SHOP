@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useData } from '@/contexts/DataContext';
 import { Download, Upload, AlertTriangle, FileJson, Trash2, Receipt } from 'lucide-react';
-import { validateBackup, backupCounts, type BackupFileV1 } from '@/lib/backup';
+import { validateBackup, backupCounts, generateSqlFromBackup, type BackupFileV1 } from '@/lib/backup';
 
 type Status = { kind: 'success' | 'error' | 'info'; message: string } | null;
 
@@ -33,12 +33,27 @@ const DataBackup = () => {
     URL.revokeObjectURL(url);
   };
 
+  const downloadSql = (sql: string, suffix: string) => {
+    const blob = new Blob([sql], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `jos-coffee-backup-${suffix}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.sql`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleExport = async () => {
     setExportBusy(true); setExportStatus(null);
     try {
       const json = await exportBackup();
       download(json);
-      setExportStatus({ kind: 'success', message: 'Backup downloaded successfully (includes user accounts and app settings).' });
+      
+      const parsed = JSON.parse(json);
+      const sql = generateSqlFromBackup(parsed, false);
+      downloadSql(sql, 'complete');
+      
+      setExportStatus({ kind: 'success', message: 'Backup downloaded successfully (both JSON and SQL versions generated).' });
     } catch (e: any) {
       setExportStatus({ kind: 'error', message: e?.message || 'Export failed' });
     } finally { setExportBusy(false); }
@@ -83,7 +98,12 @@ const DataBackup = () => {
     try {
       const json = await exportTransactionsBackup();
       download(json);
-      setTxStatus({ kind: 'success', message: 'Transactions-only backup downloaded.' });
+      
+      const parsed = JSON.parse(json);
+      const sql = generateSqlFromBackup(parsed, true);
+      downloadSql(sql, 'transactions');
+      
+      setTxStatus({ kind: 'success', message: 'Transactions-only backup downloaded (both JSON and SQL versions).' });
     } catch (e: any) {
       setTxStatus({ kind: 'error', message: e?.message || 'Export failed' });
     } finally { setTxBusy(null); }
@@ -133,10 +153,10 @@ const DataBackup = () => {
         <div className="bg-card rounded-xl border border-border p-6">
           <Download size={32} className="text-primary mb-3" />
           <h3 className="font-display text-lg font-bold text-foreground mb-1">Export Backup</h3>
-          <p className="text-muted-foreground text-sm mb-4">Download a complete JSON snapshot of categories, menu, transactions and settings.</p>
+          <p className="text-muted-foreground text-sm mb-4">Download a complete JSON snapshot and raw SQL inserts of categories, menu, transactions and settings.</p>
           <div className="flex flex-col gap-2">
             <button onClick={handleExport} disabled={exportBusy} className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 disabled:opacity-50">
-              {exportBusy ? 'Exporting…' : 'Download Complete Backup'}
+              {exportBusy ? 'Exporting…' : 'Download Complete Backup (JSON + SQL)'}
             </button>
           </div>
           {exportStatus && (
@@ -202,7 +222,7 @@ const DataBackup = () => {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <button onClick={handleTxExport} disabled={txBusy !== null} className="px-4 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
-            <Download size={16} /> {txBusy === 'export' ? 'Exporting…' : 'Export Transactions'}
+            <Download size={16} /> {txBusy === 'export' ? 'Exporting…' : 'Export Transactions (JSON + SQL)'}
           </button>
           <label className={`px-4 py-2.5 rounded-xl bg-secondary text-secondary-foreground font-semibold text-sm flex items-center justify-center gap-2 ${txBusy !== null ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:opacity-90'}`}>
             <Upload size={16} /> {txBusy === 'import' ? 'Importing…' : 'Import Transactions'}
