@@ -59,12 +59,32 @@ const SalesReports = () => {
   const netRevenue = totalRevenue - totalRefunds;
 
   const itemCounts: Record<string, { name: string; count: number; revenue: number }> = {};
-  paidFiltered.forEach(t => t.items.forEach(i => { const key = `${i.name}-${i.size}`; if (!itemCounts[key]) itemCounts[key] = { name: `${i.name}${i.size !== 'default' ? ` (${i.size})` : ''}`, count: 0, revenue: 0 }; itemCounts[key].count += i.quantity; itemCounts[key].revenue += i.price * i.quantity; }));
-  const topItems = Object.values(itemCounts).sort((a, b) => b.count - a.count).slice(0, 10);
+  paidFiltered.forEach(t => t.items.forEach(i => {
+    const isReturnedOrNegative = i.name.toLowerCase().includes('returned item') || i.price < 0 || i.quantity < 0;
+    if (isReturnedOrNegative) return;
+    const key = `${i.name}-${i.size}`;
+    if (!itemCounts[key]) {
+      itemCounts[key] = { name: `${i.name}${i.size !== 'default' ? ` (${i.size})` : ''}`, count: 0, revenue: 0 };
+    }
+    itemCounts[key].count += i.quantity;
+    itemCounts[key].revenue += i.price * i.quantity;
+  }));
+  const topItems = Object.values(itemCounts)
+    .filter(i => i.count > 0 && i.revenue > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
 
   const categoryRevenue: Record<string, number> = {};
-  paidFiltered.forEach(t => t.items.forEach(i => { categoryRevenue[i.name] = (categoryRevenue[i.name] || 0) + i.price * i.quantity; }));
-  const categoryData = Object.entries(categoryRevenue).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, value]) => ({ name: name.length > 15 ? name.slice(0, 15) + '…' : name, value }));
+  paidFiltered.forEach(t => t.items.forEach(i => {
+    const isReturnedOrNegative = i.name.toLowerCase().includes('returned item') || i.price < 0 || i.quantity < 0;
+    if (isReturnedOrNegative) return;
+    categoryRevenue[i.name] = (categoryRevenue[i.name] || 0) + i.price * i.quantity;
+  }));
+  const categoryData = Object.entries(categoryRevenue)
+    .sort((a, b) => b[1] - a[1])
+    .filter(([_, value]) => value > 0)
+    .slice(0, 8)
+    .map(([name, value]) => ({ name: name.length > 15 ? name.slice(0, 15) + '…' : name, value }));
 
   const dailySales: Record<string, number> = {};
   paidFiltered.forEach(t => { const day = t.timestamp.slice(0, 10); dailySales[day] = (dailySales[day] || 0) + t.total; });
@@ -101,6 +121,8 @@ const SalesReports = () => {
 
     const itemsMap: Record<string, { name: string; count: number; revenue: number }> = {};
     paidTxs.forEach(t => t.items.forEach(i => {
+      const isReturnedOrNegative = i.name.toLowerCase().includes('returned item') || i.price < 0 || i.quantity < 0;
+      if (isReturnedOrNegative) return;
       const key = `${i.name}-${i.size}`;
       if (!itemsMap[key]) {
         itemsMap[key] = { name: `${i.name}${i.size !== 'default' ? ` (${i.size})` : ''}`, count: 0, revenue: 0 };
@@ -108,7 +130,10 @@ const SalesReports = () => {
       itemsMap[key].count += i.quantity;
       itemsMap[key].revenue += i.price * i.quantity;
     }));
-    const topItemsList = Object.values(itemsMap).sort((a, b) => b.count - a.count).slice(0, 10);
+    const topItemsList = Object.values(itemsMap)
+      .filter(i => i.count > 0 && i.revenue > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
 
     const cashMap: Record<string, { count: number; revenue: number }> = {};
     paidTxs.forEach(t => {

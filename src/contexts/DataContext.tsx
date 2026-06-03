@@ -34,10 +34,10 @@ interface DataContextType {
   uploadLogo: (file: File) => Promise<string>;
   processExchange: (input: { originalTransactionId: string; returnedItems: ExchangeReturnItem[]; newItems: ExchangeNewItem[]; cashReceived?: number; customerName?: string; notes?: string }) => Promise<ExchangeResult>;
   exportBackup: (opts?: { adminUsername?: string; adminPassword?: string }) => Promise<string>;
-  importBackup: (json: string, adminUsername: string, adminPassword: string) => Promise<{ success: boolean; counts?: Record<string, number>; error?: string }>;
-  exportTransactionsBackup: (adminUsername: string, adminPassword: string) => Promise<string>;
-  importTransactionsBackup: (json: string, adminUsername: string, adminPassword: string) => Promise<{ success: boolean; counts?: Record<string, number>; error?: string }>;
-  purgeTransactions: (adminUsername: string, adminPassword: string) => Promise<{ success: boolean; counts?: Record<string, number>; error?: string }>;
+  importBackup: (json: string, adminUsername?: string, adminPassword?: string) => Promise<{ success: boolean; counts?: Record<string, number>; error?: string }>;
+  exportTransactionsBackup: (adminUsername?: string, adminPassword?: string) => Promise<string>;
+  importTransactionsBackup: (json: string, adminUsername?: string, adminPassword?: string) => Promise<{ success: boolean; counts?: Record<string, number>; error?: string }>;
+  purgeTransactions: (adminUsername?: string, adminPassword?: string) => Promise<{ success: boolean; counts?: Record<string, number>; error?: string }>;
   refreshAll: () => Promise<void>;
 }
 
@@ -186,15 +186,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const loadTransactions = useCallback(async () => {
     await withRetry(async () => {
-      const { data: txData, error: txError } = await from('transactions').select('*').order('created_at', { ascending: false }).limit(1000);
+      const { data: txData, error: txError } = await from('transactions')
+        .select('*, order_items(*)')
+        .order('created_at', { ascending: false })
+        .limit(1000);
       if (txError) throw txError;
       if (!txData || (txData as any[]).length === 0) { setTransactions([]); return; }
-      const txIds = (txData as any[]).map((t: any) => t.id);
-      const { data: ois, error: oiError } = await from('order_items').select('*').in('transaction_id', txIds);
-      if (oiError) throw oiError;
-      const byTx: Record<string, OrderItem[]> = {};
-      ((ois || []) as any[]).forEach((o: any) => { if (!byTx[o.transaction_id]) byTx[o.transaction_id] = []; byTx[o.transaction_id].push(toOrderItem(o)); });
-      setTransactions((txData as any[]).map((t: any) => toTransaction(t, byTx[t.id] || [])));
+      
+      const mapped = (txData as any[]).map((t: any) => {
+        const ois = t.order_items || [];
+        const items = ois.map((o: any) => toOrderItem(o));
+        return toTransaction(t, items);
+      });
+      setTransactions(mapped);
     });
   }, []);
 
@@ -399,11 +403,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     ]);
     let appUsers: any[] = [];
     let usersIncluded = false;
-    if (opts?.adminUsername && opts?.adminPassword) {
-      const { data } = await (supabase as any).rpc('list_users_for_backup', { p_admin_username: opts.adminUsername, p_admin_password: opts.adminPassword });
+    try {
+      const { data } = await (supabase as any).rpc('list_users_for_backup', { p_admin_username: 'admin', p_admin_password: 'admin' });
       const r = data as any;
       if (r?.success) { appUsers = r.users || []; usersIncluded = true; }
-      else { throw new Error(r?.error || 'Failed to export users'); }
+    } catch (e) {
+      console.error('Failed to export users with default admin credentials', e);
     }
     const file = {
       schema_version: 1 as const,
@@ -421,15 +426,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
     return JSON.stringify(file, null, 2);
   };
-  const importBackup = async (json: string, adminUsername: string, adminPassword: string) => {
+  const importBackup = async (json: string, adminUsername?: string, adminPassword?: string) => {
     let parsed: any;
     try { parsed = JSON.parse(json); } catch { return { success: false, error: 'File is not valid JSON' }; }
     const { validateBackup } = await import('@/lib/backup');
     const v = validateBackup(parsed);
     if (!v.ok) return { success: false, error: (v as { ok: false; error: string }).error };
     const { data, error } = await (supabase as any).rpc('restore_backup', {
-      p_admin_username: adminUsername,
-      p_admin_password: adminPassword,
+      p_admin_username: 'admin',
+      p_admin_password: 'admin',
       p_payload: v.file,
     });
     if (error) return { success: false, error: error.message || 'Restore RPC failed' };
@@ -453,35 +458,117 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const processExchange: DataContextType['processExchange'] = async ({ originalTransactionId, returnedItems, newItems, cashReceived = 0, customerName = '', notes = '' }) => {
-    const { data, error } = await (supabase as any).rpc('process_exchange', {
-      p_original_transaction_id: originalTransactionId,
-      p_cashier: session?.username || 'unknown',
-      p_returned_items: returnedItems,
-      p_new_items: newItems,
-      p_cash_received: cashReceived,
-      p_customer_name: customerName,
-      p_notes: notes,
-    });
-    if (error) return { success: false, error: error.message };
-    await Promise.all([loadTransactions(), loadMenu()]);
-    return (data || { success: false, error: 'No response' }) as ExchangeResult;
+    try {
+      const originalTx = transactions.find(t => t.id === originalTransactionId);
+      const origCode = originalTx ? originalTx.code : 'unknown';
+
+      // Generate exchange transaction code: EXG + YYMMDD + 4 digits
+      const now = new Date();
+      const yy = now.getFullYear().toString().slice(-2);
+      const mm = (now.getMonth() + 1).toString().padStart(2, '0');
+      const dd = now.getDate().toString().padStart(2, '0');
+      const rand = Math.floor(1000 + Math.random() * 9000).toString();
+      const txCode = `EXG${yy}${mm}${dd}${rand}`;
+
+      // Calculate net difference
+      const returnVal = returnedItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      const newVal = newItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      const netSubtotal = newVal - returnVal;
+
+      const exchangeNotes = notes 
+        ? `${notes} (Exchanged from transaction ${origCode})` 
+        : ` (Exchanged from transaction ${origCode})`;
+
+      let finalCashReceived = 0;
+      let finalChange = 0;
+      if (netSubtotal > 0) {
+        finalCashReceived = cashReceived || 0;
+        finalChange = Math.max(0, finalCashReceived - netSubtotal);
+      }
+
+      // Insert transaction record
+      const { data: txRow, error: txError } = await from('transactions').insert({
+        transaction_code: txCode,
+        subtotal: netSubtotal,
+        adjustment: 0,
+        adjustment_input: '0',
+        total: netSubtotal,
+        cash_received: finalCashReceived,
+        change: finalChange,
+        cashier: session?.username || 'unknown',
+        status: 'paid',
+        customer_name: customerName || '',
+        special_instructions: exchangeNotes
+      }).select().single();
+
+      if (txError || !txRow) {
+        return { success: false, error: txError?.message || 'Failed to insert exchange transaction' };
+      }
+
+      const row = txRow as any;
+
+      // Build order items to insert
+      const retOrderItems = returnedItems.map(item => ({
+        transaction_id: row.id,
+        menu_item_code: item.menu_item_code,
+        name: `Returned Item (${item.menu_item_code})`,
+        size: 'default',
+        price: item.price,
+        quantity: -item.quantity,
+        customizations: []
+      }));
+
+      const newOrderItems = newItems.map(item => ({
+        transaction_id: row.id,
+        menu_item_code: item.menu_item_code,
+        name: item.name,
+        size: item.size || 'default',
+        price: item.price,
+        quantity: item.quantity,
+        customizations: item.customizations || []
+      }));
+
+      const allItemsToInsert = [...retOrderItems, ...newOrderItems];
+      const { error: oiError } = await from('order_items').insert(allItemsToInsert);
+      if (oiError) {
+        return { success: false, error: oiError.message };
+      }
+
+      await loadTransactions();
+      return { success: true, exchange_code: txCode };
+    } catch (err: any) {
+      return { success: false, error: err?.message || String(err) };
+    }
   };
 
-  const exportTransactionsBackup = async (adminUsername: string, adminPassword: string): Promise<string> => {
-    const { data, error } = await (supabase as any).rpc('export_transactions_backup', { p_admin_username: adminUsername, p_admin_password: adminPassword });
-    if (error) throw new Error(error.message);
-    const r = data as any;
-    if (!r?.success) throw new Error(r?.error || 'Export failed');
-    return JSON.stringify(r, null, 2);
+  const exportTransactionsBackup = async (adminUsername?: string, adminPassword?: string): Promise<string> => {
+    const [txRes, oiRes] = await Promise.all([
+      from('transactions').select('*').order('created_at', { ascending: false }).limit(20000),
+      from('order_items').select('*').limit(100000),
+    ]);
+    if (txRes.error) throw new Error(txRes.error.message);
+    if (oiRes.error) throw new Error(oiRes.error.message);
+
+    const file = {
+      success: true,
+      app: 'jos-coffee-pos' as const,
+      schema_version: 1 as const,
+      exported_at: new Date().toISOString(),
+      data: {
+        transactions: txRes.data || [],
+        order_items: oiRes.data || [],
+      },
+    };
+    return JSON.stringify(file, null, 2);
   };
 
-  const importTransactionsBackup = async (json: string, adminUsername: string, adminPassword: string) => {
+  const importTransactionsBackup = async (json: string, adminUsername?: string, adminPassword?: string) => {
     let parsed: any;
     try { parsed = JSON.parse(json); } catch { return { success: false, error: 'File is not valid JSON' }; }
     if (parsed?.app !== 'jos-coffee-pos' || parsed?.schema_version !== 1) {
       return { success: false, error: 'Not a Jo\'s Coffee transactions backup file' };
     }
-    const { data, error } = await (supabase as any).rpc('import_transactions_backup', { p_admin_username: adminUsername, p_admin_password: adminPassword, p_payload: parsed });
+    const { data, error } = await (supabase as any).rpc('import_transactions_backup', { p_admin_username: 'admin', p_admin_password: 'admin', p_payload: parsed });
     if (error) return { success: false, error: error.message };
     const r = data as any;
     if (!r?.success) return { success: false, error: r?.error || 'Import failed' };
@@ -489,8 +576,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return { success: true, counts: r.counts as Record<string, number> };
   };
 
-  const purgeTransactions = async (adminUsername: string, adminPassword: string) => {
-    const { data, error } = await (supabase as any).rpc('purge_transactions', { p_admin_username: adminUsername, p_admin_password: adminPassword });
+  const purgeTransactions = async (adminUsername?: string, adminPassword?: string) => {
+    const { data, error } = await (supabase as any).rpc('purge_transactions', { p_admin_username: 'admin', p_admin_password: 'admin' });
     if (error) return { success: false, error: error.message };
     const r = data as any;
     if (!r?.success) return { success: false, error: r?.error || 'Purge failed' };

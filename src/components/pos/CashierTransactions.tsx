@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useData } from '@/contexts/DataContext';
 import type { Transaction } from '@/lib/data';
-import { X, Eye, RotateCcw, Ban, Undo2 } from 'lucide-react';
+import { X, Eye, RotateCcw, Ban, Undo2, ArrowLeftRight } from 'lucide-react';
+import ExchangeDialog from './ExchangeDialog';
 
 const CashierTransactions = ({ onClose }: { onClose: () => void }) => {
   const { session, transactions, updateTransaction } = useData();
   const myTx = session?.role === 'admin' ? transactions : transactions.filter(t => t.cashier === session?.username);
   const [viewing, setViewing] = useState<Transaction | null>(null);
+  const [exchangingTx, setExchangingTx] = useState<Transaction | null>(null);
 
   const handleRefund = async (tx: Transaction) => {
     if (!confirm(`Refund transaction ${tx.code}?`)) return;
@@ -52,6 +54,7 @@ const CashierTransactions = ({ onClose }: { onClose: () => void }) => {
               <div className="flex gap-1 mt-2 flex-wrap">
                 <button onClick={() => setViewing(tx)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-muted text-muted-foreground hover:text-foreground text-xs"><Eye size={12} /> View Details</button>
                 {tx.status === 'paid' && <button onClick={() => handleRefund(tx)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 text-xs"><RotateCcw size={12} /> Refund</button>}
+                {tx.status === 'paid' && <button onClick={() => setExchangingTx(tx)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 text-xs"><ArrowLeftRight size={12} /> Exchange</button>}
                 {tx.status === 'refunded' && <button onClick={() => handleUnrefund(tx)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-accent text-accent-foreground text-xs"><Undo2 size={12} /> Undo Refund</button>}
                 {session?.role === 'admin' && tx.status !== 'voided' && <button onClick={() => handleVoid(tx)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-muted text-muted-foreground hover:text-foreground text-xs"><Ban size={12} /> Void</button>}
                 {tx.status === 'voided' && <button onClick={() => handleUnvoid(tx)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-accent text-accent-foreground text-xs"><Undo2 size={12} /> Undo Void</button>}
@@ -89,6 +92,10 @@ const CashierTransactions = ({ onClose }: { onClose: () => void }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {exchangingTx && (
+        <ExchangeDialog transaction={exchangingTx} onClose={() => setExchangingTx(null)} />
       )}
     </div>
   );
