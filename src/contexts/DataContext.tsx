@@ -170,12 +170,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         const mapped = (data as any[]).map((r: any) => {
           const item = toMenuItem(r, catsToUse);
           if (!item.tags || item.tags.length === 0) {
-            const auto = getAutoTags(item.name, item.category);
-            item.tags = auto;
-            // Write back to database in the background asynchronously
-            from('menu_items').update({ tags: auto }).eq('id', item.id).then(({ error: extErr }) => {
-              if (extErr) console.warn(`Automatic tagging failed for ${item.name}:`, extErr);
-            });
+            item.tags = getAutoTags(item.name, item.category);
           }
           return item;
         });
@@ -394,13 +389,44 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const exportBackup = async (opts?: { adminUsername?: string; adminPassword?: string }): Promise<string> => {
-    const [catsRes, menuRes, txRes, oiRes, ssRes] = await Promise.all([
-      from('categories').select('*').order('sort_order'),
-      from('menu_items').select('*'),
-      from('transactions').select('*').order('created_at', { ascending: false }).limit(10000),
-      from('order_items').select('*').limit(50000),
-      from('store_settings').select('*').limit(1).single(),
-    ]);
+    // Small tables
+    const catsRes = await from('categories').select('*').order('sort_order');
+    if (catsRes.error) throw new Error(`Failed to fetch categories: ${catsRes.error.message}`);
+
+    const ssRes = await from('store_settings').select('*').limit(1).single();
+    if (ssRes.error) throw new Error(`Failed to fetch store settings: ${ssRes.error.message}`);
+
+    // Chunked fetching for potential large/slow tables to bypass PostgreSQL statement timeouts
+    const fetchAllChunked = async (tableName: string, orderByColumn?: string, maxRows = 100000) => {
+      let allData: any[] = [];
+      const chunkSize = tableName === 'menu_items' ? 15 : 500;
+      let start = 0;
+      while (start < maxRows) {
+        const end = start + chunkSize - 1;
+        let q = from(tableName).select('*').range(start, end);
+        if (orderByColumn) {
+          q = q.order(orderByColumn, { ascending: false });
+        }
+        const { data, error } = await q;
+        if (error) {
+          throw new Error(`Failed to fetch database records from ${tableName} (${start}-${end}): ${error.message}`);
+        }
+        if (!data || data.length === 0) {
+          break;
+        }
+        allData = [...allData, ...data];
+        if (data.length < chunkSize) {
+          break;
+        }
+        start += chunkSize;
+      }
+      return allData;
+    };
+
+    const menuItems = await fetchAllChunked('menu_items');
+    const transactions = await fetchAllChunked('transactions', 'created_at', 10000);
+    const orderItems = await fetchAllChunked('order_items', undefined, 50000);
+
     let appUsers: any[] = [];
     let usersIncluded = false;
     try {
@@ -417,9 +443,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       users_passwords_included: usersIncluded,
       data: {
         categories: catsRes.data || [],
-        menu_items: menuRes.data || [],
-        transactions: txRes.data || [],
-        order_items: oiRes.data || [],
+        menu_items: menuItems,
+        transactions: transactions,
+        order_items: orderItems,
         app_users: appUsers,
         store_settings: ssRes.data || null,
       },
@@ -542,12 +568,34 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const exportTransactionsBackup = async (adminUsername?: string, adminPassword?: string): Promise<string> => {
-    const [txRes, oiRes] = await Promise.all([
-      from('transactions').select('*').order('created_at', { ascending: false }).limit(20000),
-      from('order_items').select('*').limit(100000),
-    ]);
-    if (txRes.error) throw new Error(txRes.error.message);
-    if (oiRes.error) throw new Error(oiRes.error.message);
+    const fetchAllChunked = async (tableName: string, orderByColumn?: string, maxRows = 100000) => {
+      let allData: any[] = [];
+      const chunkSize = 500;
+      let start = 0;
+      while (start < maxRows) {
+        const end = start + chunkSize - 1;
+        let q = from(tableName).select('*').range(start, end);
+        if (orderByColumn) {
+          q = q.order(orderByColumn, { ascending: false });
+        }
+        const { data, error } = await q;
+        if (error) {
+          throw new Error(`Failed to fetch ${tableName} range ${start}-${end}: ${error.message}`);
+        }
+        if (!data || data.length === 0) {
+          break;
+        }
+        allData = [...allData, ...data];
+        if (data.length < chunkSize) {
+          break;
+        }
+        start += chunkSize;
+      }
+      return allData;
+    };
+
+    const transactions = await fetchAllChunked('transactions', 'created_at', 20000);
+    const orderItems = await fetchAllChunked('order_items', undefined, 100000);
 
     const file = {
       success: true,
@@ -555,8 +603,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       schema_version: 1 as const,
       exported_at: new Date().toISOString(),
       data: {
-        transactions: txRes.data || [],
-        order_items: oiRes.data || [],
+        transactions: transactions,
+        order_items: orderItems,
       },
     };
     return JSON.stringify(file, null, 2);
